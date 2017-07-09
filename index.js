@@ -1,5 +1,4 @@
-const AES = require('crypto-js/aes')
-const ECB = require('crypto-js/mode-ecb')
+const crypto = require('crypto')
 const noble = global.noble = require('noble')
 const mac = '00:21:4d:03:20:1b'
 const macArray = mac.split(':')
@@ -19,7 +18,14 @@ let ch = null
 const range = to => Array(to).fill().map((_, i) => i)
 
 function encrypt (key, data) {
-  return Buffer.from(AES.encrypt(Buffer.from(data).toString(), Buffer.from(key).reverse().toString(), {mode: ECB}).toString())
+  key = Buffer.from(key)
+  key.reverse()
+  data = Buffer.from(data)
+  data.reverse()
+  const cipher = crypto.createCipheriv('aes-128-ecb', key, Buffer.from([]))
+  const encryptedData = cipher.update(data).reverse()
+  console.log(encryptedData, '<- rev', {key, data})
+  return  encryptedData
 }
 
 function generateSk (name, password, data1, data2) {
@@ -30,41 +36,35 @@ function generateSk (name, password, data1, data2) {
     key.push(letter.charCodeAt(0) ^ password[index].charCodeAt(0))
   })
   const data = [...data1.slice(0, 8), data2.slice(0, 8)]
-  console.log({key, data}, 'what now punk')
   return encrypt(key, data)
 }
 
 function keyEncrypt (name, password, data) {
-  name = Array.from(name.padStart(16, 0x0))
-  password = Array.from(password.padStart(16, 0x0))
+  name = name.padEnd(16, '\u0000')
+  password = password.padEnd(16, '\u0000')
   const key = []
-  name.forEach((letter, index) => {
+  ;[].forEach.call(name, (letter, index) => {
     key.push(letter.charCodeAt(0) ^ password[index].charCodeAt(0))
   })
+  console.log('name', name, 'pass', password, 'data', data, 'key', key)
   return encrypt(data, key)
 }
 
 function encryptPacket (sk, mac, packet) {
   let tmp = [mac[0], mac[1], mac[2], mac[3], 0x01, packet[0], packet[1], packet[2], 15, 0, 0, 0, 0, 0, 0, 0]
-  console.log({tmp}, 'i dont smoke crack motherfucker')
   tmp = encrypt(sk, tmp)
-  console.log({tmp}, 'i sell it')
 
   let i = 0
 
   range(15).forEach(i => {
     tmp[i] = tmp[i] ^ packet[i + 5]
   })
-  console.log({tmp}, 'im sean connery')
 
   tmp = encrypt(sk, tmp)
-  console.log({tmp}, 'black beatle')
 
-  console.log({packet}, 'b4')
   range(2).forEach(i => {
     packet[i + 3] = tmp[i]
   })
-  console.log({packet}, 'aft')
 
   tmp = [0, mac[0], mac[1], mac[2], mac[3], 0x01, packet[0], packet[1], packet[2], 0, 0, 0, 0, 0, 0, 0]
 
@@ -78,9 +78,7 @@ function encryptPacket (sk, mac, packet) {
     packet[i + 5] ^= tmp2[i]
   })
 
-  console.log({tmp, tmp2})
-
-  return packet
+  return Buffer.from(packet)
 }
 
 const nobleReady = new Promise(resolve =>
@@ -107,10 +105,11 @@ global.connect = async function connect () {
   const packet = [0x0c]
   packet.push(data.slice(0, 8))
   packet.push(encryptedData.slice(0, 8))
-  await new Promise(resolve => pairch.write(new Buffer(packet), false, resolve))
-  const received = await new Promise(resolve => pairch.read((error, data) => resolve(data)))
-  console.log({received})
-  light.sk = generateSk(name, password, data.slice(0, 8), received ? received.slice(1, 9) : [0,0,0,0,0,0,0,0,0])
+  await new Promise(resolve => ch.write(new Buffer(packet), false, resolve))
+  const received = await new Promise(resolve => ch.read((error, data) => resolve(data)))
+  console.log({data, data2: received})
+  light.sk = generateSk(name, password, data.slice(0, 8), received.slice(1, 9))
+  console.log('sk', light.sk)
   return light
 }
 
@@ -133,27 +132,25 @@ global.sendPacket = async function sendPacket (id, command, data) {
   if (packetCount > 0xffff) packetCount = 1
 
   console.log({packet, encryptedPacket})
-  const response = await new Promise(resolve => light.writeHandle(0x15, new Buffer(encryptedPacket), false, (_, response) => resolve(response)))
-  console.log({response})
-  return response
+  return new Promise(resolve => light.writeHandle(0x15, encryptedPacket, false, resolve))
 }
 
-global.setState = async function setState (red, green, blue, brightness) {
+global.setState = function setState (red, green, blue, brightness) {
   colors = [red, green, blue, brightness]
   return sendPacket(0xffff, 0xc1, colors)
 }
 
-async function setDefaultState (...colors) {
+function setDefaultState (...colors) {
   return sendPacket(0xffff, 0xc4, colors)
 }
 
 /// brightness, speed, mode, loop
-async function setRainbow (...args) {
+function setRainbow (...args) {
   return sendPacket(0xffff, 0xca, args)
 }
 
-async function setMosquito (brightness) {
+function setMosquito (brightness) {
   return sendPacket(0xffff, 0xcb, [brightness, 0, 0, 0])
 }
 
-nobleReady.then(global.connect).then(() => setState(0x00, 0xcc, 0xcc, 0xcc))
+nobleReady.then(global.connect).then(() => setState(0x00, 0xcc, 0xcc, 0xcc)).then(process.exit)

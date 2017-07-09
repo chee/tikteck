@@ -1,7 +1,6 @@
 const crypto = require('crypto')
 const noble = global.noble = require('noble')
 let mac = '00:21:4d:03:20:1b'
-let macArray = mac.split(':')
 const name = 'Smart Light'
 const password = '234'
 let colors = [
@@ -87,7 +86,12 @@ const nobleReady = new Promise(resolve =>
 global.connect = async function connect () {
   global.light = light = await new Promise(resolve => {
     noble.on('discover', thing => {
-      thing.address === mac && resolve(thing)
+      console.log(thing.advertisement.localName, name)
+      if (thing.advertisement.localName === name) {
+        console.log('thinging')
+        mac = thing.address
+        resolve(thing)
+      }
     })
     noble.startScanning()
   })
@@ -124,8 +128,9 @@ global.sendPacket = async function sendPacket (id, command, data) {
   packet[11] = data[1]
   packet[12] = data[2]
   packet[13] = data[3]
-  const mac = Buffer.from([macArray[5], macArray[4], macArray[3], macArray[2], macArray[1], macArray[0]].map(n => parseInt(n, 16)))
-  const encryptedPacket = encryptPacket(light.sk, mac, [...packet])
+  const macArray = mac.split(':')
+  const macKey = Buffer.from([macArray[5], macArray[4], macArray[3], macArray[2], macArray[1], macArray[0]].map(n => parseInt(n, 16)))
+  const encryptedPacket = encryptPacket(light.sk, macKey, [...packet])
   packetCount += 1
   if (packetCount > 0xffff) packetCount = 1
 

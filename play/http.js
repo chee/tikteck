@@ -1,0 +1,12 @@
+const net = require('net')
+const express = require('express')
+const bodyParser = require('body-parser')
+const app = express()
+const socket = net.connect('/tmp/blub')
+app.use(bodyParser.json())
+app.use(bodyParser.urlencoded({extended: true}))
+app.post('/colors', function (request, response) {
+  socket.write(request.body.color)
+  response.send('thanks!')
+})
+app.listen(8018)
